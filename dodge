@@ -3,9 +3,10 @@ from aim_fsm import *
 class Dodge(StateMachineProgram):
 	$setup{
 		check: BallCheck()
-		check =S=> Say("ball") =RND=> {Left, Right}=T(10)=> check
-		check =F=> color =C=> check
-		color: Glow(vex.LightType.ALL_LEDS , vex.Color.BLUE)
+		check =S=> color_s =RND=> {Left, Right}=T(3)=> check
+		check =F=> color_f =C=> check
+		color_f: Glow(vex.LightType.ALL_LEDS , vex.Color.BLUE)
+		color_s: Glow(vex.LightType.ALL_LEDS , vex.Color.RED)
 		Right: Sideways(50)
 		Left: Sideways(-50)
 	}
