@@ -1,0 +1,40 @@
+from aim_fsm import *
+from aim_fsm.worldmap import RobotObj
+import math
+
+class FindClosestRobot(StateNode):
+    """StateNode to traverse the world map and find the closest visible robot object."""
+    def start(self, event=None):
+        super().start(event)
+        closest_robot = None
+        min_dist = float('inf')
+        
+        for obj in self.robot.world_map.objects.values():
+            if isinstance(obj, RobotObj):
+                print(f"Checking {obj.name} | Visible: {obj.is_visible} | Pose: {obj.pose.x:.1f}, {obj.pose.y:.1f}")
+                if obj.is_visible:
+                    dist = math.sqrt((obj.pose.x - self.robot.pose.x)**2 + (obj.pose.y - self.robot.pose.y)**2)
+                    print(f"  -> Distance: {dist:.1f}")
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest_robot = obj
+                    
+        if closest_robot is not None:
+            self.post_data(closest_robot)
+        else:
+            self.post_failure()
+
+class TestAimAtRobot(StateMachineProgram):
+    """FSM program to find the closest robot, turn towards it, and kick the ball."""
+    $setup {
+        # Define states for finding, turning, waiting, and kicking
+        finder: FindClosestRobot()
+        turner: TurnToward()
+        waiter: StateNode()
+        kicker: Kick()
+        complain: Say("I do not see the robot.")
+
+        # Transitions: if found, turn, kick, then wait 1 seconds; if not found, complain.
+        finder =D=> turner =C=> kicker =C=> waiter =T(1)=> finder
+        finder =F=> complain =C=> finder
+    }

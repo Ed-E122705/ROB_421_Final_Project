@@ -1,0 +1,61 @@
+from aim_fsm import *
+import termProject.shared_context as shared_context
+import vex
+
+class GetHit(StateNode):
+    """
+    Looks for OrangeBarrel (the visual flash) as a sign of being hit.
+    If hit, transition out.
+    """
+    def start(self, event=None):
+        super().start(event)
+        self.set_polling_interval(0.1)
+        self.hit_detected = False
+
+    def poll(self):
+        # Look at the last observed vision objects
+        # To avoid threading issues, we can just check if an OrangeBarrelObj exists and is_visible
+        for obj in self.robot.world_map.objects.values():
+            if obj.__class__.__name__ == 'OrangeBarrelObj' and obj.is_visible:
+                if not self.hit_detected:
+                    self.hit_detected = True
+                    # Let the central orchestrator/shared context know
+                    shared_context.ScoreKeeper.score2 += 1 
+                    print(f"[Robot 1] HIT DETECTED! Score is now R1: {shared_context.ScoreKeeper.score1}, R2: {shared_context.ScoreKeeper.score2}")
+                    self.robot.erouter.post(TextMsgEvent("i_was_hit"))
+                    self.post_success()
+
+class UpdatePos(StateNode):
+    """Periodically publish position to shared context."""
+    def start(self, event=None):
+        super().start(event)
+    def poll(self):
+        shared_context.ScoreKeeper.r1_pose = self.robot.pose
+
+class CountBarrels(StateNode):
+    """Continuously count visible barrels and store in shared_context."""
+    def start(self, event=None):
+        super().start(event)
+        self.set_polling_interval(0.1)
+    def poll(self):
+        count = 0
+        for obj in self.robot.world_map.objects.values():
+            if obj.__class__.__name__ in ['BarrelObj', 'OrangeBarrelObj', 'BlueBarrelObj'] and obj.is_visible:
+                count += 1
+        shared_context.ScoreKeeper.barrel_count = count
+
+class Robot1Program(StateMachineProgram):
+    $setup {
+        pos_updater: UpdatePos()
+        barrel_counter: CountBarrels()
+        
+        start_node: Print("Robot 1 Initialized") =C=> startup_flash
+        startup_flash: Flash(vex.Color.RED, duration=2) =C=> hit_watcher
+        hit_watcher: GetHit() =S=> flash_node
+        
+        flash_node: StateNode()
+        flash_node_1: Say("Ouch") =C=> flash_node_2
+        flash_node_2: Flash(vex.Color.RED) =C=> hit_watcher
+        
+        flash_node =C=> flash_node_1
+    }
