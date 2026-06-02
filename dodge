@@ -1,0 +1,19 @@
+from aim_fsm import *
+
+class Dodge(StateMachineProgram):
+	$setup{
+		check: BallCheck()
+		check =S=> Say("ball") =RND=> {Left, Right}=T(10)=> check
+		check =F=> color =C=> check
+		color: Glow(vex.LightType.ALL_LEDS , vex.Color.BLUE)
+		Right: Sideways(50)
+		Left: Sideways(-50)
+	}
+class BallCheck(StateNode):
+	def start(self, event=None):
+		super().start(event)
+		for obj in robot.world_map.objects.values():
+			if isinstance(obj, SportsBallObj) and not obj.is_visible:
+				self.post_success()
+				return
+		self.post_failure()
