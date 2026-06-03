@@ -3,18 +3,22 @@ from aim_fsm import *
 class Dodge(StateMachineProgram):
 	$setup{
 		check: BallCheck()
-		check =S=> color_s =RND=> {Left, Right}=T(3)=> check
+		check =S=> color_s =RND=> {Right, Left, BL_Sashay, BR_Sashay, FL_Sashay, FR_Sashay}=T(3)=> check
 		check =F=> color_f =C=> check
 		color_f: Glow(vex.LightType.ALL_LEDS , vex.Color.BLUE)
 		color_s: Glow(vex.LightType.ALL_LEDS , vex.Color.RED)
 		Right: Sideways(50)
 		Left: Sideways(-50)
+		BL_Sashay: MoveFor(-50,-45)
+		BR_Sashay: MoveFor(-50,45)
+		FL_Sashay: MoveFor(50,45)
+		FR_Sashay: MoveFor(50,-45)
 	}
 class BallCheck(StateNode):
 	def start(self, event=None):
 		super().start(event)
 		for obj in robot.world_map.objects.values():
-			if isinstance(obj, SportsBallObj) and not obj.is_visible:
+			if isinstance(obj, SportsBallObj) and obj.is_visible:
 				self.post_success()
 				return
 		self.post_failure()
