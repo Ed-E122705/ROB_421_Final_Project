@@ -1,0 +1,61 @@
+from aim_fsm import *
+import time
+
+
+class shoot_at_target(StateMachineProgram):
+    def __init__(self, target):
+        super().__init__()
+        self.target = target
+    $setup{
+        # pass target
+        velocity: find_velocity()
+        projection: projecting()
+        kicker: Kick()
+        turning: Turn()
+        velocity =D=> projection =D=> turning =C=> kicker
+    }
+
+
+class find_velocity(StateNode):
+    def start(self, event=None):
+		super().start(event)
+        obj = self.parent.target
+        # take current position, wait 0.5s, get position again, compute velocity
+        old_x, old_y = obj.pose.x, obj.pose.y
+        delay = 0.1
+        #wait(delay, SECONDS)
+        time.sleep(delay)
+        new_x, new_y = obj.pose.x, obj.pose.y
+        v_x = (new_x-old_x)/delay
+        v_y = (new_y - old_y)/delay
+        target = (new_x, new_y, v_x, v_y)
+        #print(self.parent)
+        #print(type(self.parent))
+        #print("Velocity:" target)
+        self.post_data(target)
+        self.post_completion()
+        
+
+class projecting(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        target_position = event.data
+
+        heading = self.robot.kine.project_to_target(target_position)
+        print(heading)
+        #self.robot.actuators['drive'].turn(self, heading * pi/180)
+        self.post_data(heading)
+        self.post_completion()
+
+class kick(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        self.robot.actuators['kick'].kick(self, vex.KickType.MEDIUM)
+        self.post_completion()
+
+class turn(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        heading = event.data
+        self.robot.actuators['drive'].turn(self, heading * pi/180)
+        self.post_completion()
