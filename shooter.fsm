@@ -1,0 +1,48 @@
+from aim_fsm import *
+import shoot_at_target
+
+class shooter(StateMachineProgram):
+
+    $setup{
+        find: FindTarget()
+        shoot: shoot_target()
+
+        find =D=> shoot=T(10)=>find
+        find =F=>find   # retry loop
+    }
+
+
+class FindTarget(StateNode):
+
+    def start(self, event=None):
+        super().start(event)
+
+        objects = [
+            obj for obj in self.robot.world_map.objects.values()
+            if isinstance(obj, BlueBarrelObj)
+        ]
+
+        if not objects:
+            self.post_failure()
+            return
+
+        target = objects[0]
+        print("FOUND TARGET:", target)
+
+        self.post_data(target)
+        self.post_completion()
+
+
+class shoot_target(StateNode):
+
+    def start(self, event=None):
+        super().start(event)
+
+        target = event.data
+
+        # pass target into existing FSM logic
+        fsm = shoot_at_target.shoot_at_target(target)
+
+        fsm.start()
+
+        self.post_completion()
