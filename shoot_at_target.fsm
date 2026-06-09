@@ -5,57 +5,88 @@ import time
 class shoot_at_target(StateMachineProgram):
     def __init__(self, target):
         super().__init__()
+        #print("shoot_at_target __init__")
         self.target = target
     $setup{
         # pass target
-        velocity: find_velocity()
+        velocity_s: find_velocity_start()
+        velocity_wait: Wait(0.1)
+        velocity_e: find_velocity_end()
         projection: projecting()
-        kicker: Kick()
-        turning: Turn()
-        velocity =D=> projection =D=> turning =C=> kicker
+        kicker: kick()
+        turning: turn()
+        velocity_s =C=> velocity_wait =C=> velocity_e =D=> projection =D=> turning =C=> kicker
     }
 
 
-class find_velocity(StateNode):
+class find_velocity_start(StateNode):
     def start(self, event=None):
-		super().start(event)
-        obj = self.parent.target
-        # take current position, wait 0.5s, get position again, compute velocity
-        old_x, old_y = obj.pose.x, obj.pose.y
-        delay = 0.1
-        #wait(delay, SECONDS)
-        time.sleep(delay)
+        super().start(event)
+        #print("ENTERED Velocity")
+        self.robot.world_map.clear()
+        self.post_completion()
+
+class find_velocity_end(StateNode):
+    def start(self, event=None):
+        #print("ENTERED Velocity End")
+        super().start(event)
+        # Re-acquire target from fresh world map instead of using stale obj.pose
+        objects = [
+            obj for obj in self.robot.world_map.objects.values()
+            if isinstance(obj, BlueBarrelObj)
+        ]
+        if not objects:
+            self.post_failure()
+            return
+        obj = objects[0]
         new_x, new_y = obj.pose.x, obj.pose.y
-        v_x = (new_x-old_x)/delay
-        v_y = (new_y - old_y)/delay
-        target = (new_x, new_y, v_x, v_y)
-        #print(self.parent)
-        #print(type(self.parent))
-        #print("Velocity:" target)
+        # velocity is zero since target is stationary and we just reset
+        target = (new_x, new_y, 0.0, 0.0)
         self.post_data(target)
         self.post_completion()
-        
+
 
 class projecting(StateNode):
     def start(self, event=None):
         super().start(event)
+        #print("ENTERED projecting")
         target_position = event.data
 
         heading = self.robot.kine.project_to_target(target_position)
-        print(heading)
-        #self.robot.actuators['drive'].turn(self, heading * pi/180)
         self.post_data(heading)
         self.post_completion()
 
 class kick(StateNode):
     def start(self, event=None):
         super().start(event)
+        #print("ENTERED kick")
         self.robot.actuators['kick'].kick(self, vex.KickType.MEDIUM)
         self.post_completion()
 
 class turn(StateNode):
     def start(self, event=None):
         super().start(event)
-        heading = event.data
-        self.robot.actuators['drive'].turn(self, heading * pi/180)
+        self.target_heading = event.data
+        self.robot.actuators['drive'].turn(self, self.target_heading)
+        self.poll()
+
+    def poll(self):
+        current = self.robot.pose.theta
+        error = math.atan2(
+            math.sin(self.target_heading - current),
+            math.cos(self.target_heading - current)
+        )
+        if abs(error) < 0.05:  # ~3 degrees tolerance
+            self.post_completion()
+        else:
+            self.robot.loop.call_later(0.05, self.poll)  # check again in 50ms
+
+class Wait(StateNode):
+    def __init__(self, duration):
+        super().__init__()
+        self.duration = duration
+    
+    def start(self, event=None):
+        super().start(event)
+        time.sleep(self.duration)
         self.post_completion()
