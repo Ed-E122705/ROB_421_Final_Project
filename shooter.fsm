@@ -28,7 +28,6 @@ class FindTarget(StateNode):
 
         target = objects[0]
         print("FOUND TARGET:", target)
-
         self.post_data(target)
         self.post_completion()
 
@@ -36,13 +35,13 @@ class FindTarget(StateNode):
 class shoot_target(StateNode):
 
     def start(self, event=None):
+        #print("ENTERED shoot_target")
         super().start(event)
 
         target = event.data
 
         # pass target into existing FSM logic
         fsm = shoot_at_target.shoot_at_target(target)
-
+        
+        fsm.on_completion = self.post_completion
         fsm.start()
-
-        self.post_completion()
