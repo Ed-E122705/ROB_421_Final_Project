@@ -126,21 +126,10 @@ class Kinematics():
         """
 
 
-        # # Current robot position
-        # target_x, target_y, target_theta, target_vx, target_vy, target_ω = target_pose
-        # target_world_frame = geometry.point(target_x, target_y, 0)
-        # target_transform = self.base_to_joint('world')
-
-        # target_robot_frame = target_transform.dot(target_world_frame)
-        # rob_x = self.robot.pose.x
-        # rob_y = self.robot.pose.y
-        # rob_theta = self.robot.pose.theta
-        
-
-        # x_displacement = target_robot_frame[0, 0]
-        # y_displacement = target_robot_frame[1, 0]
-        
-
+        # Current robot position
+        self.get_pose()
+        print("JOINTS:", {name: j.q for name, j in self.joints.items()})
+        print("POSE:", self.robot.pose.x, self.robot.pose.y, self.robot.pose.theta)
         target_x, target_y, target_vx, target_vy = target_pose
         rob_x = self.robot.pose.x
         rob_y = self.robot.pose.y
@@ -153,16 +142,20 @@ class Kinematics():
         
         
 
-        ball_speed = 7.14 #m/s
+        ball_speed = 6.4 #m/s
         ball_travel_time = distance / ball_speed
-
+        for _ in range(2):
         # predict where target will be
-        x_predict = target_x + target_vx * ball_travel_time
-        y_predict = target_y + target_vy * ball_travel_time
+            x_predict = target_x + target_vx * ball_travel_time
+            y_predict = target_y + target_vy * ball_travel_time
+            x_displacement = x_predict - rob_x
+            y_displacement = y_predict - rob_y
+            distance = np.sqrt(x_displacement**2+y_displacement**2)
+            ball_travel_time = distance / ball_speed 
 
         # vectorize
-        x_displacement = x_predict - rob_x
-        y_displacement = y_predict - rob_y
+        
+        
         heading = math.atan2(y_displacement, x_displacement)
         angle_to_turn = heading - rob_theta
         
@@ -171,7 +164,18 @@ class Kinematics():
             math.sin(angle_to_turn),
             math.cos(angle_to_turn)
             )
-        robot_turn = robot_turn * 180/np.pi
+        robot_turn = robot_turn #* 180/np.pi
+
+        print("\n--- AIM DEBUG ---")
+        print("robot pose:", rob_x, rob_y, rob_theta)
+        print("target:", target_x, target_y)
+        print("predicted:", x_predict, y_predict)
+        print("heading (abs):", heading)
+        print("delta:", angle_to_turn)
+        print("-----------------\n")
+        print("distance:", distance)
+        print("ball_time:", ball_travel_time)
+        print("pred shift:", target_vx * ball_travel_time, target_vy * ball_travel_time)
 
         # return heading
         return robot_turn
