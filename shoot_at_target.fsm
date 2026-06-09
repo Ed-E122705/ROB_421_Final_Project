@@ -1,11 +1,8 @@
 from aim_fsm import *
 import time
-
-
 class shoot_at_target(StateMachineProgram):
     def __init__(self, target):
         super().__init__()
-        #print("shoot_at_target __init__")
         self.target = target
     $setup{
         # pass target
@@ -17,52 +14,46 @@ class shoot_at_target(StateMachineProgram):
         turning: turn()
         velocity_s =C=> velocity_wait =C=> velocity_e =D=> projection =D=> turning =C=> kicker
     }
-
-
 class find_velocity_start(StateNode):
     def start(self, event=None):
         super().start(event)
-        #print("ENTERED Velocity")
         self.robot.world_map.clear()
+        #print("ENTERED find_velocity")
+        obj = self.parent.target
+        # take current position, wait a delay, get position again, compute velocity
+        self.parent.state_1 = (obj.pose.x, obj.pose.y)
+
+        #self.post_data(state_1)
         self.post_completion()
 
 class find_velocity_end(StateNode):
     def start(self, event=None):
-        #print("ENTERED Velocity End")
         super().start(event)
-        # Re-acquire target from fresh world map instead of using stale obj.pose
-        objects = [
-            obj for obj in self.robot.world_map.objects.values()
-            if isinstance(obj, BlueBarrelObj)
-        ]
-        if not objects:
-            self.post_failure()
-            return
-        obj = objects[0]
+        old_x, old_y = self.parent.state_1
+        obj = self.parent.target
+        delay = 0.1
+        #wait(delay, SECONDS)
+        #time.sleep(delay)
         new_x, new_y = obj.pose.x, obj.pose.y
-        # velocity is zero since target is stationary and we just reset
-        target = (new_x, new_y, 0.0, 0.0)
+        v_x = (new_x - old_x) / delay
+        v_y = (new_y - old_y) / delay
+        target = (new_x, new_y, v_x, v_y)
         self.post_data(target)
         self.post_completion()
-
-
 class projecting(StateNode):
     def start(self, event=None):
         super().start(event)
         #print("ENTERED projecting")
         target_position = event.data
-
         heading = self.robot.kine.project_to_target(target_position)
         self.post_data(heading)
         self.post_completion()
-
 class kick(StateNode):
     def start(self, event=None):
         super().start(event)
         #print("ENTERED kick")
         self.robot.actuators['kick'].kick(self, vex.KickType.MEDIUM)
         self.post_completion()
-
 class turn(StateNode):
     def start(self, event=None):
         super().start(event)
@@ -80,12 +71,11 @@ class turn(StateNode):
             self.post_completion()
         else:
             self.robot.loop.call_later(0.05, self.poll)  # check again in 50ms
-
 class Wait(StateNode):
     def __init__(self, duration):
         super().__init__()
         self.duration = duration
-    
+
     def start(self, event=None):
         super().start(event)
         time.sleep(self.duration)
