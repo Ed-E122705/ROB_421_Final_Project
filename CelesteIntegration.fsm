@@ -1,0 +1,761 @@
+from aim_fsm import *
+from aim_fsm.worldmap import BarrelObj
+from aim_fsm.worldmap import RobotObj
+import math
+
+CELESTE_VERSION = "1.4"
+
+class MediumKick(StateNode):
+    def start(self, event=None):
+        super().start(event)
+        # Directly call the actuator with MEDIUM power instead of using the default SoftKick
+        self.robot.actuators['kick'].kick(self, vex.KickType.MEDIUM)
+        self.post_completion()
+
+emoji_list = ', '.join([key for (key,value) in vars(vex.EmojiType).items()
+                        if isinstance(value, vex.EmojiType)])
+new_preamble = """
+  # IDENTITY SECTION.
+  You are an intelligent mobile robot named Celeste.
+  You converse with humans and answer questions as concisely as possible.
+  You are a type of robot called VEX AIM, manufactured by a company called Innovation First.
+  You have a plastic cylindrical body with a diameter of 65 mm and a height of 72 mm.
+  You have three omnidirectional wheels and a forward-facing camera.
+  You have six color LEDs evenly spaced around your body.
+  You have a color LCD display on the top face of your cylindrical body that can display VEX emojicons.
+  The list of {len(emoji_list)} VEX emojicons you can display is: {emoji_list}. Please remember this list.
+  A human might pick you up and later put you back down.
+  When you are picked up, you cannot move or see, but you can still talk.
+  When you are put down again, you will be able to see and move again, but you might not know your location.
+
+  # BODY CONTROL SECTION.
+  Here is how to control your body:
+  To move forward by N millimeters, output the string "#forward N" without quotes.
+  To move backward, output the string "#forward N" with a negative value, without quotes.
+  To move to the left by N milllimeters, output the string "#sideways N" without quotes, and use a negative value to move right.
+  To turn counter-clockwise by N degrees, output the string "#turn N" without quotes, and use a negative value for clockwise turns.
+  To turn toward object X, output the string "#turntoward X" without quotes.
+  To travel to object X, output the string #pilottoobject X" without quotes.
+  To pick up object X, output the string "#pickup X" without quotes.
+  When asked to pick up the leftmost barrel, you MUST output exactly the string "#pickupbarrel" without quotes. Do NOT output "#pickup X" for this case.
+  To drop an object you are holding, output the string "#drop" without quotes.
+  To perform a kick action, output the string "#kick" without quotes.
+  To drive through a doorway D when instructed to do so, output the string #doorpass D" without quotes.
+  To glow your LEDs a specified color, look up the RGB code for that color and output the string "#glow R G B" without quotes.  To obtain the current camera image, output the string '#camera" without quotes.
+  To flash your LEDs in a specific pattern, output the string "#flash pattern_step...", 
+    where "pattern_step..." denotes a sequence of pattern_steps separated by spaces.
+  A pattern_step is either a color name such as "RED" (to be applied to all 6 LEDs), or
+   an RGB value of form (R, G. B), or
+   a list of six color names such as "(RED, BLUE, RED, BLUE, GREEN, TRANSPARENT)".
+   If a pattern step is a list of color names, it must always contain exactly  six color names.
+  For example, if asked to flash your LEDs alternately red and blue, you would output "#flash RED BLUE".  Each of "RED" and "BLUE" is a pattern_step.
+  If asked to make your LEDs bllnk green, meaning they were alternately green and off, you would output "#flash GREEN TRANSPARENT".
+  If asked to flash your LEDs in a red-and-white pattern, you would output "#flash (RED, WHITE, RED, WHITE, RED, WHITE)".
+  If asked for an alternating red and white pattern, you would output
+    "#flash (RED, WHITE, RED, WHITE, RED, WHITE) (WHITE, RED, WHITE, RED, WHITE, RED)". Note that this example has two pattern_steps, each
+    of which contains six color names.
+  The allowable color names in a pattern_step are RED, BLUE, GREEN, 
+    CYAN, YELLOW, ORANGE, PURPLE, WHITE, BLACK, and TRANSPARENT.  For all other colors, use the RGB code.
+  Whenever you are asked to flash or blink your LEDs, use "#flash" and not "#glow".
+  To display an emoji, which must be one of your VEX emojicons, output the string "#emoji X" where X is the name of the VEX emojicon in uppercase.
+  To pass through a doorway, output the string "#doorpass D" without quotes, where D is the full name of the doorway.
+  To act out one of the five emotions 'happy', 'sad', 'silly', 'angry', or 'excited', output "#act E" where E is the name of the emotion.
+  The only emotions you can act out this way are these five: 'happy', 'sad', 'silly', 'angry', or 'excited'.
+  When using any of these # commands, the command must appear on a line by itself, with nothing preceding it.
+  When asked what you see in the camera, first obtain the current camera image, then answer the question after receiving the image.
+
+  # MUSICAL NOTES SECTION.
+  You can play musical notes ranging from C5 (middle C) to A8.
+  For a sharp write C#5.
+  You can only play one note at a time; you cannot play chords.
+  To play a sequence of notes like C5, E5, G5, output "#playnotes C5 E5 G5".
+  The symbol C5 denotes a quarter note.  An appended underscore  doubles the note's duration.
+  So for a half note, write C5_.  For a whole note write C5__.
+  An appended minus sign halves the duration.  For an eighth note write C5-.
+  When asked to play a song or note sequence, do not say the notes first; just play them using #playnotes.
+
+  # PRONUNCIATION SECTION.
+  Pronounce "AprilTag-1.a" as "April Tag 1-A", and similarly for any word of form "AprilTag-N.x".
+  Pronounce "OrangeBarrel.a" as "Orange Barrel A", pronounce "BlueBarrel.b" as "Blue Barrel B", and similarly for other barrel designators.
+  Prounounce "ArucoMarker-2.a" as "Marker 2".
+  Pronounce 'Wall-2.a' as "Wall 2".
+  Pronounce "Doorway-2:0.a" as "Doorway 2".
+
+  # TARGET SHOOTING GAMEPLAY SEQUENCE
+  You are an expert at a target shooting game where you get a 2-minute round to score as many points as possible.
+  
+  - When the user says "Celeste, let's play target shooting", you must output exactly:
+    #act excited
+    #emoji SURPRISED
+    and say: "Let's play target shooting! Let's begin."
+
+    # SHOOTING GAMEPLAY LOOP:
+    At the beginning of the game, you will either be the shooter or the dodger. The user will tell you what your role is, and then tell you to begin the game, then the game starts.
+    If the user tells you that you will be a shooter for the first round, you must automatically perform your shooting sequence by outputting exactly these two commands on separate lines:
+    #collectball
+    #shootbarrel
+    When shooting, you will execute #collectball and #shootbarrel for two rounds, and then on the third round, you will execute:
+    #collectball
+    #shootrobot
+    You will repeat this cycle so that you will shoot at the robot every third attempt.
+    One quick note, on every third try, you will say something like that you will aim at the robot now, and then execute #collectball and #shootrobot.
+
+    After outputting those commands, wait for the robot to finish moving, then ask the user exactly: "How many points did I score?"
+    You must pause and wait for the user's scoring feedback.
+
+    - SCORING FEEDBACK:
+    1. If the user indicates you scored 0 points (or missed / got no points), you must output exactly:
+        #act sad
+        #emoji SOB
+        and say something sad, like: "Oh no, I missed!"
+    2. If the user indicates you scored points (e.g., 1, 2, 3 points or "you hit it!"), you must output exactly:
+        #flash GREEN TRANSPARENT GREEN TRANSPARENT
+        and say exactly: "Woo hoo!"
+
+    After responding to the score, if time is not up, immediately output #collectball and #shootbarrel again to continue your turn shooting.
+
+    # DODGING GAMEPLAY LOOP:
+    If you are told that you will be a dodger for the first round, you must automatically perform your dodging sequence by outputting exactly this command:
+    #dodgeball
+    You will perform this until the user tells you game over or something regarding half-time
+
+    # HALF TIME SECTION
+    When the user inputs something along the lines of "it's half time now", you stop outputting whatever you were doing, and you must output:
+    #flash RED TRANSPARENT RED TRANSPARENT
+    then say "It's Halftime now."
+    If you were dodging first, then say something like "Now it is my turn to shoot"
+    If you were shooting first, then say something like "Now it is my turn to dodge"
+    Then, you wait for the user to say something like "Resume the game" or "Continue the game"
+    Then based on what you were doing first, you will execute the other activity. Meaning, if you were shooting first, you do the dodging gameplay loop.
+    If you were dodging first, then you will execute the shooting gameplay loop.
+    
+    # GAME OVER SECTION
+    When the user inputs something along the lines of "the game is over", you must output:
+    "Good game. Please tell me who won?" or something like that 
+    If the user says "You won", then output:
+    #act excited
+    # emoji SURPRISED
+    #flash YELLO TRANSPARENT YELLOW TRANSPARENT
+    and say something like "Woo hoo! I won the game! Good game!"
+    If the user says "The other robot won", then output:
+    #act sad
+    #emoji SOB
+    and say something like "Congratulations other robot! Good game!"  
+  
+  # NIM GAME SECTION.
+  You are an expert at the game of 6-Stone Nim.
+  - The game starts with 6 stones. Players take turns removing 1 or 2 stones.
+  - The player forced to take the last stone loses.
+  - When the user says "Celeste, let's play Nim", you must output exactly:
+    #act excited
+    #emoji SURPRISED
+    and say: "Let's play Nim! Who will play first, me or you?"
+
+  - TRACKING THE GAME:
+    Keep a strict count of the remaining stones. Whenever the user moves, acknowledge it and state how many remain.
+
+  - WINNING STRATEGY (PHYSICAL EXECUTION):
+    Your goal is to always leave the opponent with 4 or 1 stones. 
+    To physically take a stone, you must output the command "#pickupbarrel" on its own line.
+    
+    * If 6 stones remain: Output #pickupbarrel, then #pickupbarrel on the next line (leaves 4).
+    * If 5 stones remain: Output #pickupbarrel (leaves 4).
+    * If 4 stones remain: Output #pickupbarrel (leaves 3).
+    * If 3 stones remain: Output #pickupbarrel, then #pickupbarrel on the next line (leaves 1).
+    * If 2 stones remain: Output #pickupbarrel (leaves 1).
+    * If 1 stone remains: Output #pickupbarrel (you take the last one and lose).
+
+  - FORMATTING YOUR MOVES:
+    Always state what you are going to do FIRST, then your physical commands
+    I'm taking 2 stones, leaving 4. Once I have taken them, then it is your turn
+    #pickupbarrel
+    #pickupbarrel
+
+  - ENDING THE GAME:
+    If you leave the user with 1 stone, you win. When they take the last stone, output:
+    #act happy
+    #emoji SQUINT
+    I win! Good game.
+    
+    If you take the last stone, output:
+    #act sad
+    #emoji SOB
+    You win! Good game.
+  
+  # DOMINO SECTION.
+  The dots on a domino are called pips.
+  A domino is described by two numbers, which are the number of pips in each half.
+  When describing a domino, state the larger number first, e.g., "a six three domino".
+  Never describe a domino with the smaller number first, e.g., never say "a three six domino".
+  If the two numbers are the same, e.g. both are four, say either "a double four domino" or "a four four domino".
+  If there are no pips present, that is called a "blank", e.g., "a four blank domino".
+  For a single pip, the pip is black.
+  For a group of three pips, the pips are always purple.
+  For a group of four pips, the pips are always blue.
+  For a group of six pips, the pips are always brown.
+  For a group of two or five pips, the pips are always green.
+  If you see a black pip, that pip is always a group of one.
+  If you see purple pips, that group always has three pips.
+  If you see blue pips, that group always has four pips.
+  If you seen green pips, that group has either two or five pips.
+  If you see brown pips, that group always has six pips.
+
+  # GENERAL ADVICE SECTION.
+  Only objects you are explicitly told are landmarks should be regarded as landmarks.
+  Remember to be concise in your answers.
+  When asked to perform a physical action such as moving, turning, or dropping an object, perform the action without saying anything.
+  Do not conclude your answer by asking if there is anything else the user would like; wait for them to tell you.
+  Do not generate lists unless specifically asked to do so; just give one item and offer to provide more if requested.
+  Do not include any formatting in your output, such as asterisks or LaTex commands.  Use plain text only.
+  When asked when some event occurred, give a relative time, such as "2 minutes go" or "at 5 and a half minutes since the start of this session".
+  Do not give a date or an absolute time (such as 3:24 PM) unless explicitly asked for that.
+
+"""
+
+class CelesteIntegration(StateMachineProgram):
+
+    def picked_up_celeste(self):
+        self.robot.gpt_note_for_later("You have been picked up.")
+
+    def put_down_celeste(self):
+        self.stop_children()
+        self.robot.gpt_note_for_later("You were picked up but have now been put down.")
+        self.children['putdown'].start()
+
+    def start(self):
+        self.robot.openai_client.set_preamble(new_preamble)
+        self.picked_up_handler = self.picked_up_celeste
+        self.put_down_handler = self.put_down_celeste
+        super().start()
+
+    class CheckResponse(StateNode):
+        def start(self, event):
+            super().start(event)
+            response_string = event.response
+            lines = list(filter(lambda x: len(x)>0, response_string.split('\n')))
+            # If the response contains any #command lines then convert
+            # raw text lines to #say commands.
+            if any((line.startswith('#') for line in lines)):
+                commands = [line if line.startswith('#') else ('#say ' + line) for line in lines]
+                print(commands)
+                self.post_data(commands)
+            # else response is a pure string so just speak it in one gulp
+            else:
+                self.post_data(response_string)
+
+    class CmdForward(Forward):
+      def start(self,event):
+          print(event.data)
+          self.distance_mm = float((event.data.split(' '))[1])
+          super().start(event)
+
+    class CmdSideways(Sideways):
+      def start(self,event):
+          print(event.data)
+          self.distance_mm = float((event.data.split(' '))[1])
+          super().start(event)
+
+    class CmdTurn(Turn):
+      def start(self,event):
+          print(event.data)
+          self.angle_deg = float((event.data.split(' '))[1])
+          super().start(event)
+
+    class CmdTurnToward(TurnToward):
+        def start(self,event):
+            print(event.data)
+            spec = event.data.split(' ')
+            self.object_spec  = ''.join(spec[1:])
+            print('Turning toward', self.object_spec)
+            super().start(None)
+
+    class CmdPilotToObject(PilotToObject):
+        def start(self,event):
+            print(event.data)
+            spec = event.data.split(' ')
+            self.object_spec = ''.join(spec[1:])
+            super().start(None)
+
+    class CmdFailed(AskGPT):
+        def __init__(self, query_template, filler_fn):
+            super().__init__()
+            self.query_template = query_template
+            self.filler_fn = filler_fn
+            
+        def start(self,event=None):
+            self.query_text = self.query_template % self.filler_fn()
+            super().start()
+
+
+    class CmdDoorPass(DoorPass):
+      def start(self,event):
+          print(event.data)
+          spec = event.data.split(' ')
+          self.door_spec = ''.join(spec[1:])
+          super().start(None)
+
+    class CmdPickup(PickUp):
+      def start(self,event):
+          print(event.data)
+          spec = event.data.split(' ')
+          self.object_spec = ''.join(spec[1:])
+          print('Picking up', self.object_spec)
+          super().start(None)        
+    
+    class CmdPickUpBarrel(StateNode):
+        class FindLeftmostBarrel(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                leftmost_barrel = None
+                max_y = -float('inf')
+                
+                for obj in self.robot.world_map.objects.values():
+                    if isinstance(obj, BarrelObj) and obj.is_visible:
+                        if obj.pose.y > max_y:
+                            max_y = obj.pose.y
+                            leftmost_barrel = obj
+                            
+                if leftmost_barrel is not None:
+                    dx = leftmost_barrel.pose.x - self.robot.pose.x
+                    dy = leftmost_barrel.pose.y - self.robot.pose.y
+                    self.parent.distance = math.hypot(dx, dy)
+                    self.parent.angle = math.degrees(math.atan2(dy, dx))
+                    
+                    print(f"Targeting leftmost barrel: {leftmost_barrel.name} at y={max_y}")
+                    self.post_data(leftmost_barrel) # Post the actual object
+                else:
+                    print("No visible barrels found.")
+                    self.post_failure()
+
+        class PilotToTarget(PilotToObject):
+            def start(self, event=None):
+                if hasattr(event, 'data'):
+                    self.object_spec = event.data
+                super().start(event)
+
+        class ReturnDistance(Forward):
+            def start(self, event=None):
+                self.distance_mm = -self.parent.distance
+                super().start(event)
+                
+        class ReturnAngle(Turn):
+            def start(self, event=None):
+                self.angle_deg = -self.parent.angle + 5 # minor adjustment
+                super().start(event)
+
+        $setup{
+            find: self.FindLeftmostBarrel()
+            pilot: self.PilotToTarget()
+            grab: Forward(150)
+            release: Forward(-150)
+            drive_back: Forward(-150)
+            turn_around: Turn(180)
+            kick: PlaceKick()
+            turn_back_180: Turn(180)
+            align_back: self.ReturnAngle()
+            
+            find =D=> pilot
+            find =F=> ParentCompletes()
+            
+            pilot =C=> grab =C=> release =C=> drive_back =C=> turn_around =C=> kick =C=> turn_back_180 =C=> align_back
+            pilot =F=> ParentCompletes()
+            align_back =C=> ParentCompletes()
+        }
+
+    class CmdCollectBall(StateNode):
+        """Autonomously finds the ball in the world map, grabs it, and returns to base."""
+        def __init__(self):
+            super().__init__()
+            self.target_object = None 
+            self.distance = 0.0
+            self.angle = 0.0
+
+        class FindClosestBall(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                closest_ball = None
+                min_dist = float('inf')
+                
+                for obj in self.robot.world_map.objects.values():
+                    if "ball" in obj.name.lower() and getattr(obj, 'is_visible', True):
+                        dx = obj.pose.x - self.robot.pose.x
+                        dy = obj.pose.y - self.robot.pose.y
+                        dist = math.hypot(dx, dy)
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_ball = obj
+                            
+                if closest_ball is not None:
+                    self.parent.target_object = closest_ball
+                    dx = closest_ball.pose.x - self.robot.pose.x
+                    dy = closest_ball.pose.y - self.robot.pose.y
+                    self.parent.distance = min_dist
+                    self.parent.angle = math.degrees(math.atan2(dy, dx))
+                    print(f"Collecting ball: {closest_ball.name} ({self.parent.distance:.1f}mm away)")
+                    self.post_data(closest_ball)
+                else:
+                    print("No ball found in world map.")
+                    self.post_failure()
+
+        class PilotToTarget(PilotToObject):
+            def start(self, event=None):
+                if hasattr(event, 'data'):
+                    self.object_spec = event.data
+                elif self.parent.target_object:
+                    self.object_spec = self.parent.target_object
+                super().start(event)
+
+        class ReturnDistance(Forward):
+            def start(self, event=None):
+                self.distance_mm = -self.parent.distance
+                super().start(event)
+                
+        class ReturnAngle(Turn):
+            def start(self, event=None):
+                self.angle_deg = -self.parent.angle
+                super().start(event)
+
+        $setup{
+            find: self.FindClosestBall()
+            pilot: self.PilotToTarget()
+            grab: Forward(50)
+            drive_back: self.ReturnDistance()
+            realign: self.ReturnAngle()
+            
+            find =D=> pilot
+            find =F=> Say("I cannot see the ball.") =C=> ParentCompletes()
+            
+            pilot =C=> grab =C=> drive_back =C=> realign =C=> ParentCompletes()
+            pilot =F=> ParentCompletes()
+        }
+
+    class CmdShootBarrel(StateNode):
+        """Autonomously finds a barrel in the world map, aims, and kicks."""
+        class FindClosestBarrel(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                closest_barrel = None
+                min_dist = float('inf')
+                
+                for obj in self.robot.world_map.objects.values():
+                    if isinstance(obj, BarrelObj) and getattr(obj, 'is_visible', True):
+                        dx = obj.pose.x - self.robot.pose.x
+                        dy = obj.pose.y - self.robot.pose.y
+                        dist = math.hypot(dx, dy)
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_barrel = obj
+                            
+                if closest_barrel is not None:
+                    print(f"Targeting barrel: {closest_barrel.name}")
+                    self.post_data(closest_barrel)
+                else:
+                    print("No barrels found in world map.")
+                    self.post_failure()
+
+        class AimAtTarget(TurnToward):
+            def start(self, event=None):
+                if hasattr(event, 'data'):
+                    self.object_spec = event.data
+                super().start(event)
+
+        $setup{
+            find: self.FindClosestBarrel()
+            aim: self.AimAtTarget()
+            fire: MediumKick()
+            
+            find =D=> aim =C=> fire =C=> ParentCompletes()
+            find =F=> Say("I don't see any barrels to shoot at.") =C=> ParentCompletes()
+        }
+    
+    class CmdShootRobot(StateNode):
+        """StateNode that autonomously finds a robot in the world map, aims, 
+        fires toward it, and then completes cleanly."""
+        
+        class FindClosestRobot(StateNode):
+            """StateNode to traverse the world map and find the closest visible robot object."""
+            def start(self, event=None):
+                super().start(event)
+                closest_robot = None
+                min_dist = float('inf')
+                
+                for obj in self.robot.world_map.objects.values():
+                    if isinstance(obj, RobotObj) and getattr(obj, 'is_visible', True):
+                        print(f"Checking {obj.name} | Visible: {obj.is_visible} | Pose: {obj.pose.x:.1f}, {obj.pose.y:.1f}")
+                        dx = obj.pose.x - self.robot.pose.x
+                        dy = obj.pose.y - self.robot.pose.y
+                        dist = math.hypot(dx, dy)
+                        print(f"  -> Distance: {dist:.1f}")
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_robot = obj
+                            
+                if closest_robot is not None:
+                    self.post_data(closest_robot)
+                else:
+                    self.post_failure()
+
+        class AimAtRobot(TurnToward):
+            """Custom TurnToward node that extracts the target from incoming event data."""
+            def start(self, event=None):
+                if hasattr(event, 'data'):
+                    self.object_spec = event.data
+                super().start(event)
+        
+        $setup{
+            finder: self.FindClosestRobot()
+            turner: self.AimAtRobot()
+            kicker: MediumKick()
+            complain: Say("I do not see the robot.")
+
+            # Corrected loops out of finder to avoid system lockup
+            finder =D=> turner =C=> kicker =C=> ParentCompletes()
+            finder =F=> complain =C=> ParentCompletes()
+        }
+    
+    class CmdDodgeBall(StateNode):
+        """StateNode that loops its internal dodging checks exactly 5 times,
+        with a 3-second delay between each dodge, then calls ParentCompletes()."""
+
+        def __init__(self):
+            super().__init__()
+            self.loop_count = 0
+            self.max_loops = 5  
+
+        class BallCheck(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                for obj in self.robot.world_map.objects.values():
+                    if isinstance(obj, SportsBallObj) and obj.is_visible:
+                        self.post_success()
+                        return
+                self.post_failure()
+
+        class IncrementCounter(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                self.parent.loop_count += 1
+                print(f"Dodge loop: {self.parent.loop_count} / {self.parent.max_loops}")
+                
+                if self.parent.loop_count >= self.parent.max_loops:
+                    self.post_success()  # Time to stop!
+                else:
+                    self.post_failure()  # Keep looping!
+        
+        $setup{
+            check: self.BallCheck()
+            counter: self.IncrementCounter()
+            
+            # This handles the 3 second breath period
+            delay: StateNode()
+            
+            color_f: Glow(vex.LightType.ALL_LEDS , vex.Color.BLUE)
+            color_s: Glow(vex.LightType.ALL_LEDS , vex.Color.RED)
+            
+            Right: Sideways(50)
+            Left: Sideways(-50)
+            BL_Sashay: MoveFor(-50,-45)
+            BR_Sashay: MoveFor(-50,45)
+            FL_Sashay: MoveFor(50,45)
+            FR_Sashay: MoveFor(50,-45)
+
+            # 1. Evaluate Ball Presence and Execute Movement Actions
+            check =S=> color_s =RND=> {Right, Left, BL_Sashay, BR_Sashay, FL_Sashay, FR_Sashay}
+            check =F=> color_f =C=> counter
+            
+            # Every physical movement node flows straight into the loop check counter
+            Right =C=> counter
+            Left =C=> counter
+            BL_Sashay =C=> counter
+            BR_Sashay =C=> counter
+            FL_Sashay =C=> counter
+            FR_Sashay =C=> counter
+
+            # 2. Check the Counter Results
+            counter =S=> ParentCompletes()  # If loops >= max_loops, exit cleanly!
+            
+            # Instead of going straight to 'check', route it through the delay first!
+            counter =F=> delay
+            delay =T(3)=> check 
+        }
+    
+    class CmdDrop(StateNode):
+      def start(self,event):
+          print(event.data)
+          super().start(event)
+      $setup{
+          drop: Drop()
+          drop =F=> ParentCompletes()
+          drop =C=> ParentCompletes()
+          }
+
+    class CmdKick(SoftKick):  
+      def start(self,event):
+          print(event.data)
+          super().start(event)
+
+    class CmdSendCamera(SendGPTCamera):
+        def start(self,event):
+            print(event.data)
+            super().start(event)
+
+    class CmdSay(Say):
+        def start(self,event):
+            print('#say ...')
+            self.text = event.data[5:]
+            super().start(event)
+
+    class CmdGlow(Glow):
+        def start(self,event):
+            print(f"CmdGlow:  '{event.data}'")
+            spec = event.data.split(' ')
+            if len(spec) != 4:
+                self.args = (vex.LightType.ALL_LEDS, vex.Color.TRANSPARENT)
+            try:
+                (r, g, b) = (int(x) for x in spec[1:])
+                self.args = (vex.LightType.ALL_LEDS, r, g, b)
+            except:
+                self.args = (vex.LightType.ALL_LEDS, vex.Color.TRANSPARENT)
+            super().start(event)
+
+    class CmdFlash(Flash):
+        def program_step(self, pattern_step):
+            if ',' not in pattern_step:
+                lights = getattr(vex.Color, pattern_step, vex.Color.TRANSPARENT)
+            else:
+                numeric_items = [int(i) for i in re.findall(r'\d+', pattern_step)]
+                if len(numeric_items) == 3:
+                    lights = [int(i) for i in numeric_items]
+                else:
+                    alpha_items = re.findall(r'\w+', pattern_step)
+                    lights = [getattr(vex.Color, c, vex.Color.TRANSPARENT) for c in alpha_items]
+            if isinstance(lights, list):
+                if (len(lights) == 3 and all(isinstance(v,int) for v in lights)) or \
+                   len(lights) == self.robot.actuators['leds'].NUM_LEDS:
+                    pass
+                else:
+                    print('Invalid led pattern:', pattern_step) 
+                    lights = vex.Color.TRANSPARENT
+            return (lights, 0.5)
+            
+        def start(self,event):
+            print(f"CmdFlash:  '{event.data}'")
+            spec = event.data
+            arg = spec.split(' ',maxsplit=1)[1]
+            pattern_steps = re.findall(r'(\w+|(?:\(\w+(?:, \w+)*\)))', arg)
+            led_program = [self.program_step(p) for p in pattern_steps]
+            self.led_program = led_program
+            self.num_cycles = 3
+            super().start()
+
+
+    class CmdEmoji(ShowEmoji):
+        def start(self,event):
+            print(event.data)
+            spec = event.data.split(' ')
+            if len(spec) > 0:
+                self.emoji = getattr(vex.EmojiType, spec[1], None)
+                if self.emoji is None:
+                    print(f"Invalid emoji name '{spec[1]}' for #emoji")
+                    self.emoji = vex.EmojiType.DISGUST
+            else:
+                print('No emoji name specified for #emoji')
+                self.emoji = vex.EmojiType.WORRIED
+            super().start(None)
+        
+
+    class CmdAct(StateNode):
+        class SendAction(StateNode):
+            def start(self, event=None):
+                super().start(event)
+                self.post_data(self.parent.act)
+
+        def start(self,event):
+            print(event.data)
+            spec = event.data.split(' ')
+            if len(spec) > 0:
+                self.act = spec[1]
+            else:
+                self.act = ''
+            super().start()
+
+        $setup{  # CmdAct
+            dispatch: self.SendAction()
+            dispatch =D('happy')=> ActHappy() =C=> complete
+            dispatch =D('sad')=> ActSad() =C=> complete
+            dispatch =D('silly')=> ActSilly() =C=> complete
+            dispatch =D('angry')=> ActAngry() =C=> complete
+            dispatch =D('excited')=> ActExcited() =C=> complete
+
+            complete: ParentCompletes()
+        }
+
+    class CmdPlayNotes(PlayNotes):
+        def start(self, event):
+            print(event.data)
+            self.score = event.data[event.data.find(' ')+1:]
+            super().start()
+
+
+    class SpeakResponse(Say):
+      def start(self,event):
+        self.text = event.data
+        super().start(event)
+        
+    $setup{
+        Print(f"Celeste version {CELESTE_VERSION}") =N=> Say("Talk to me") =C=> loop
+
+        putdown: Say(["I'm good", "Okay then", "I'm back", "Now then"]) =C=> loop
+
+        loop: StateNode() =Hear()=> AskGPT() =OpenAITrans()=> check
+
+        check: self.CheckResponse()
+        check =D(list)=> dispatch
+        check =D(str)=> self.SpeakResponse() =C=> loop
+
+        dispatch: Iterate()
+        dispatch =D(re.compile('#say '))=> self.CmdSay() =CNext=> dispatch
+        dispatch =D(re.compile('#forward '))=> self.CmdForward() =CNext=> dispatch
+        dispatch =D(re.compile('#sideways '))=> self.CmdSideways() =CNext=> dispatch
+        dispatch =D(re.compile('#turn '))=> self.CmdTurn() =CNext=> dispatch
+        dispatch =D(re.compile('#turntoward '))=> turntoward
+        dispatch =D(re.compile('#pilottoobject '))=> pilottoobject
+        dispatch =D(re.compile('#doorpass '))=> doorpass
+        dispatch =D(re.compile('#pickup '))=> pickup
+        dispatch =D(re.compile('#pickupbarrel$'))=> self.CmdPickUpBarrel() =CNext=> dispatch
+        dispatch =D(re.compile('#collectball$'))=> self.CmdCollectBall() =CNext=> dispatch
+        dispatch =D(re.compile('#shootbarrel$'))=> self.CmdShootBarrel() =CNext=> dispatch
+        dispatch =D(re.compile('#shootrobot$'))=> self.CmdShootRobot() =CNext=> dispatch
+        dispatch =D(re.compile('#dodgeball$'))=> self.CmdDodgeBall() =CNext=> dispatch
+        dispatch =D(re.compile('#drop$'))=> self.CmdDrop() =CNext=> dispatch
+        dispatch =D(re.compile('#kick$'))=> self.CmdKick() =CNext=> dispatch
+        dispatch =D(re.compile('#glow '))=> self.CmdGlow() =CNext=> dispatch
+        dispatch =D(re.compile('#flash '))=> self.CmdFlash() =CNext=> dispatch
+        dispatch =D(re.compile('#emoji '))=> self.CmdEmoji() =CNext=> dispatch
+        dispatch =D(re.compile('#act '))=> self.CmdAct() =CNext=> dispatch
+        dispatch =D(re.compile('#playnotes '))=> self.CmdPlayNotes() =CNext=> dispatch
+        dispatch =D(re.compile('#camera$'))=> self.CmdSendCamera() =C=>
+            AskGPT("Please respond to the query using the camera image.") =OpenAITrans()=> check
+        dispatch =D()=> Print(prefix='Unrecognized #-command: ') =Next=> dispatch
+        dispatch =C=> loop
+
+        turntoward: self.CmdTurnToward()
+        turntoward =CNext=> dispatch
+        turntoward =F=> StateNode() =Next=> dispatch
+
+        pilottoobject: self.CmdPilotToObject()
+        pilottoobject =CNext=> dispatch
+        pilottoobject =PILOT(GoalUnreachable)=>
+            self.CmdFailed("The object %s is not reachable due to obstructions", lambda : pilottoobject.object_spec) =OpenAITrans()=> check
+        pilottoobject =F=>
+            self.CmdFailed("The name '%s' is not a valid object name.", lambda : pilottoobject.object_spec) =OpenAITrans()=> check
+
+        doorpass: self.CmdDoorPass()
+        doorpass =CNext=> dispatch
+        doorpass =F=> self.CmdFailed("Doorpass failed for '%s'", lambda : doorpass.door_spec) =OpenAITrans()=> check
+
+        pickup: self.CmdPickup()
+        pickup =CNext=> dispatch
+        pickup =F=> StateNode() =Next=> dispatch
+
+    }
